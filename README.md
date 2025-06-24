@@ -1,1 +1,1 @@
-# Projects
+Hi, I’m a Digital Solutions Developer with experience in PowerBI, DAX, Power Platform, PowerApps, Power Automate, and SQL. I’m currently focused on expanding my expertise in data engineering through upcoming projects. Outside of work, I enjoy working out and cooking. I aim to bring a balanced, down-to-earth approach to my work and collaborations.

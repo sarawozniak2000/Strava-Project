@@ -9,6 +9,7 @@ load_dotenv()
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
+print(f"Variables loaded")
 
 # Refresh access token
 def refresh_access_token():
@@ -23,6 +24,8 @@ def refresh_access_token():
     )
     response.raise_for_status()
     return response.json()["access_token"]
+
+print(f"Access token refreshed")
 
 # Pull data
 def get_activities(access_token, per_page=200): #200 is the most Strava API allows
@@ -44,6 +47,7 @@ def get_activities(access_token, per_page=200): #200 is the most Strava API allo
         page += 1
 
     return activities
+print(f"Activity data pulled")
 
 # Run and export to CSV
 if __name__ == "__main__":

@@ -91,7 +91,7 @@ def store_new_activities(df):
         cur.execute("SELECT 1 FROM strava_data_allactivities WHERE id = ?", (row["id"],))
         if not cur.fetchone():
             cur.execute('''
-                INSERT INTO strava_data_allactivities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO strava_data_allactivities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ''', tuple(row[col] for col in df.columns))
 
     conn.commit()

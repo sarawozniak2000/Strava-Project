@@ -25,7 +25,7 @@ def refresh_access_token():
     return response.json()["access_token"]
 
 # Pull data
-def get_activities(access_token, per_page=200):
+def get_activities(access_token, per_page=200): #200 is the most Strava API allows
     activities = []
     page = 1
 
@@ -50,5 +50,5 @@ if __name__ == "__main__":
     token = refresh_access_token()
     activities = get_activities(token)
     df = pd.json_normalize(activities)  # Flatten nested JSON
-    df.to_csv("strava_data.csv", index=False)
-    print(f"Exported {len(df)}  activities to strava_data.csv")
+    df.to_csv("strava_data_allactivities.csv", index=False)
+    print(f"Exported {len(df)}  activities to strava_data_allactivities.csv")

@@ -3,3 +3,4 @@ requests
 python-dotenv
 google-cloud-bigquery
 google-auth
+pyarrow

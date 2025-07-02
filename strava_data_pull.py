@@ -12,6 +12,9 @@ load_dotenv()
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
+print("CLIENT_ID:", CLIENT_ID)
+print("CLIENT_SECRET:", CLIENT_SECRET)
+print("REFRESH_TOKEN:", REFRESH_TOKEN)
 DB_FILE = "strava_activities.db"
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_activity_upload" 
 

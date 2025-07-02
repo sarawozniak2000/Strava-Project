@@ -3,10 +3,10 @@ name: Weekly Strava Sync
 on:
   schedule:
     - cron: '0 12 * * 1'  # Every Monday at 12:00 UTC
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+  workflow_dispatch:      # Allow manual trigger
 
 jobs:
-  strava_sync:
+  run-script:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,15 +23,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set up Google credentials
-        run: echo "${{ secrets.GCP_CREDENTIALS_JSON }}" > /tmp/credentials.json
-        env:
-          GCP_CREDENTIALS_JSON: ${{ secrets.GCP_CREDENTIALS_JSON }}
+      - name: Decode GCP credentials
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS_B64 }}" | base64 -d > /tmp/credentials.json
+        shell: bash
 
-      - name: Run Strava data pull
-        run: python strava_data_pull.py
+      - name: Set Google Application Credentials env
+        run: echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json" >> $GITHUB_ENV
+
+      - name: Run data pull
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/credentials.json
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
           STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
           STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
+        run: |
+          python strava_data_pull.py

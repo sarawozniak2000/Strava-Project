@@ -52,4 +52,5 @@ jobs:
 
       - name: Run transformation SQL in BigQuery
         run: |
-          bq query --use_legacy_sql=false < transform_cleaned_table.sql
+          bq query --use_legacy_sql=false --project_id=vast-cogency-464203-t0 < transform_cleaned_table.sql
+

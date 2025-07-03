@@ -38,3 +38,13 @@ jobs:
           STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
         run: |
           python strava_data_pull.py
+
+      - name: Install bq CLI
+        run: |
+          curl -sSL https://sdk.cloud.google.com | bash > /dev/null
+          echo "$HOME/google-cloud-sdk/bin" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Run transformation SQL in BigQuery
+        run: |
+          bq query --use_legacy_sql=false < transform_cleaned_table.sql

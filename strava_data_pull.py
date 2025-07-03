@@ -67,5 +67,6 @@ if __name__ == "__main__":
     token = refresh_access_token()
     data = get_activities(token)
     df = pd.json_normalize(data)
+    df.columns = df.columns.str.replace('.', '_', regex=False)
     upload_to_bigquery(df)
     print("Raw activity data uploaded to BigQuery.")

@@ -29,4 +29,4 @@ SELECT
     ROUND(elev_high / 3.280839, 2) AS elevation_high,
     ROUND(elev_low / 3.280839, 2) AS elevation_low,
     ROUND(total_elevation_gain / 3.280839, 2) AS elevation_gain
-FROM `vast-cogency-464203-t0.strava_activity_upload.strava_activity_upload`;
+FROM `vast-cogency-464203-t0.strava_activity_upload.strava_activity_allactivities`;

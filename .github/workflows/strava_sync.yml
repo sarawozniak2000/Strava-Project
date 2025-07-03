@@ -45,6 +45,11 @@ jobs:
           echo "$HOME/google-cloud-sdk/bin" >> $GITHUB_PATH
         shell: bash
 
+      - name: Activate GCP service account
+        run: |
+          gcloud auth activate-service-account --key-file=/tmp/credentials.json
+
+
       - name: Run transformation SQL in BigQuery
         run: |
           bq query --use_legacy_sql=false < transform_cleaned_table.sql

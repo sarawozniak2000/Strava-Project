@@ -22,7 +22,7 @@ BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned
 # Optional Drive target (set as a GitHub secret -> env)
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
 
-# Write GCP credentials file if provided (so both BQ + Drive can auth)
+# Write GCP credentials file if provided
 if "GCP_CREDENTIALS_JSON" in os.environ:
     with open("credentials.json", "w") as f:
         f.write(os.environ["GCP_CREDENTIALS_JSON"])
@@ -69,24 +69,22 @@ def _safe_offset(lst, i):
 def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df_raw.copy()
 
-    # flatten dotted cols from json_normalize earlier
     df.columns = df.columns.str.replace(".", "_", regex=False)
 
-    # make sure columns exist even if missing from some rows
-    for col in [
+    # Ensure all expected columns exist
+    expected_cols = [
         "id", "name", "type", "sport_type", "moving_time", "elapsed_time", "distance",
         "total_elevation_gain", "start_date_local", "timezone", "start_latlng", "end_latlng",
         "average_speed", "max_speed", "average_heartrate", "max_heartrate",
-        "average_cadence", "average_watts", "kilojoules", "elev_high", "elev_low"
-    ]:
+        "average_cadence", "average_watts", "kilojoules", "elev_high", "elev_low", "kudos_count"
+    ]
+    for col in expected_cols:
         if col not in df:
             df[col] = None
 
-    # Timestamp parse
-    # start_date_local example format: '2024-01-01T08:30:00Z'
     ts = pd.to_datetime(df["start_date_local"], errors="coerce", utc=True)
 
-    # Build output columns to match your SQL SELECT list
+    # Build output
     out = pd.DataFrame({
         "id": df["id"],
         "name": df["name"],
@@ -95,13 +93,13 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "moving_time_mins": (df["moving_time"] / 60.0).round(2),
         "elapsed_time_mins": (df["elapsed_time"] / 60.0).round(2),
         "distance_miles": (df["distance"] / 1609.344).round(2),
+        # in meters from Strava
         "total_elevation_gain": df["total_elevation_gain"],
         "local_start_date": ts.dt.tz_convert(None).dt.date,
         "local_start_time": ts.dt.tz_convert(None).dt.time,
         "timezone": df["timezone"],
-        # after ') ' e.g. "(GMT-07:00) America/Denver" -> "America/Denver"
         "timezone_name": df["timezone"].astype(str).str.split(r"\)\s+", n=1, regex=True).str[-1],
-        "kudos_count": df.get("kudos_count"),
+        "kudos_count": df["kudos_count"],
         "start_latlng": df["start_latlng"],
         "end_latlng": df["end_latlng"],
         "start_latitude": df["start_latlng"].apply(lambda x: _safe_offset(x, 0)),
@@ -115,13 +113,20 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "average_cadence": df["average_cadence"],
         "average_watts": df["average_watts"],
         "kilojoules": df["kilojoules"],
-        # Mirrors your SQL (divide by 3.280839). Change to *3.280839 if you intended feet.
-        "elevation_high": (df["elev_high"] / 3.280839).round(2) if "elev_high" in df else None,
-        "elevation_low": (df["elev_low"] / 3.280839).round(2) if "elev_low" in df else None,
-        "elevation_gain": (df["total_elevation_gain"] / 3.280839).round(2),
+        # Convert meters → feet
+        "elevation_high": (df["elev_high"] * 3.280839).round(2) if "elev_high" in df else None,
+        "elevation_low": (df["elev_low"] * 3.280839).round(2) if "elev_low" in df else None,
+        "elevation_gain": (df["total_elevation_gain"] * 3.280839).round(2),
     })
 
-    # BQ-safe column names
+    # Calculate pace_min_per_mile
+    out["pace_min_per_mile"] = out.apply(
+        lambda r: round(60 / r["average_speed_mph"],
+                        2) if r["average_speed_mph"] and r["average_speed_mph"] > 0 else None,
+        axis=1
+    )
+
+    # BQ-safe col names
     out.columns = (
         out.columns.str.strip()
         .str.replace(r"[^0-9a-zA-Z_]", "_", regex=True)
@@ -170,7 +175,7 @@ if __name__ == "__main__":
     print("Uploading transformed data to BigQuery...")
     upload_to_bigquery(df_clean, BQ_TABLE_ID)
 
-    # Save & upload the same transformed extract to Drive
+    # Save CSV and push to Drive
     out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
     df_clean.to_csv(out_name, index=False)
     upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)

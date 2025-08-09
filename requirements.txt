@@ -4,3 +4,4 @@ python-dotenv
 google-cloud-bigquery
 google-auth
 pyarrow
+pandas-gbq>=0.26.1

@@ -23,6 +23,9 @@ BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned
 # Drive target
 DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # set as a GitHub secret
 
+# Full Google Drive scope (not just drive.file)
+DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
+
 
 def refresh_access_token():
     r = requests.post(
@@ -65,7 +68,6 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df_raw.copy()
     df.columns = df.columns.str.replace(".", "_", regex=False)
 
-    # ensure expected columns exist (Strava fields may be missing on some activities)
     expected_cols = [
         "id", "name", "type", "sport_type", "moving_time", "elapsed_time", "distance",
         "total_elevation_gain", "start_date_local", "timezone", "start_latlng", "end_latlng",
@@ -86,7 +88,7 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "moving_time_mins": (df["moving_time"] / 60.0).round(2),
         "elapsed_time_mins": (df["elapsed_time"] / 60.0).round(2),
         "distance_miles": (df["distance"] / 1609.344).round(2),
-        "total_elevation_gain": df["total_elevation_gain"],  # meters (raw)
+        "total_elevation_gain": df["total_elevation_gain"],
         "local_start_date": ts.dt.tz_convert(None).dt.date,
         "local_start_time": ts.dt.tz_convert(None).dt.time,
         "timezone": df["timezone"],
@@ -105,20 +107,17 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "average_cadence": df["average_cadence"],
         "average_watts": df["average_watts"],
         "kilojoules": df["kilojoules"],
-        # meters → feet
         "elevation_high": (df["elev_high"] * 3.280839).round(2) if "elev_high" in df else None,
         "elevation_low": (df["elev_low"] * 3.280839).round(2) if "elev_low" in df else None,
         "elevation_gain": (df["total_elevation_gain"] * 3.280839).round(2),
     })
 
-    # minutes per mile from average speed (mph)
     out["pace_min_per_mile"] = out.apply(
-        lambda r: round(60 / r["average_speed_mph"],
-                        2) if r["average_speed_mph"] and r["average_speed_mph"] > 0 else None,
+        lambda r: round(60 / r["average_speed_mph"], 2)
+        if r["average_speed_mph"] and r["average_speed_mph"] > 0 else None,
         axis=1
     )
 
-    # BigQuery-safe column names
     out.columns = (
         out.columns.str.strip()
         .str.replace(r"[^0-9a-zA-Z_]", "_", regex=True)
@@ -149,33 +148,41 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
             "GOOGLE_APPLICATION_CREDENTIALS not set or file missing.")
 
     creds = service_account.Credentials.from_service_account_file(
-        cred_path, scopes=["https://www.googleapis.com/auth/drive.file"]
+        cred_path, scopes=DRIVE_SCOPE
     )
     print("Uploading to Drive as service account:", creds.service_account_email)
 
     service = build("drive", "v3", credentials=creds)
 
-    # Preflight: verify folder exists and is a folder; supports Shared Drives
-    try:
-        folder_meta = service.files().get(
-            fileId=folder_id,
-            fields="id,name,mimeType,driveId",
+    def resolve_folder(fid: str) -> str:
+        meta = service.files().get(
+            fileId=fid,
+            fields="id,name,mimeType,driveId,shortcutDetails",
             supportsAllDrives=True
         ).execute()
+        mt = meta.get("mimeType")
+        if mt == "application/vnd.google-apps.shortcut":
+            target = meta.get("shortcutDetails", {}).get("targetId")
+            if not target:
+                raise RuntimeError(
+                    f"Folder ID {fid} is a shortcut without targetId.")
+            return resolve_folder(target)
+        if mt != "application/vnd.google-apps.folder":
+            raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
+        return meta["id"]
+
+    try:
+        resolved_folder_id = resolve_folder(folder_id)
     except HttpError as e:
         raise RuntimeError(
             f"Folder ID check failed. Is DRIVE_FOLDER_ID correct and shared with "
             f"{creds.service_account_email}? Original error: {e}"
         )
 
-    if folder_meta.get("mimeType") != "application/vnd.google-apps.folder":
-        raise RuntimeError(
-            f"ID {folder_id} is not a folder (mimeType={folder_meta.get('mimeType')}).")
-
     media = MediaFileUpload(
         local_csv_path, mimetype="text/csv", resumable=True)
-    file_metadata = {"name": os.path.basename(
-        local_csv_path), "parents": [folder_id]}
+    file_metadata = {"name": os.path.basename(local_csv_path), "parents": [
+        resolved_folder_id]}
 
     created = service.files().create(
         body=file_metadata,
@@ -205,6 +212,6 @@ if __name__ == "__main__":
     df_clean.to_csv(out_name, index=False)
 
     print("Uploading CSV to Google Drive...")
-    upload_csv_to_drive(out_name, '1y54nkUW9UCTMrvVEMSXAtOdn4-AgT3mn')
+    upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)
 
     print("Done.")

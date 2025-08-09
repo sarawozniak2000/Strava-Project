@@ -16,17 +16,11 @@ CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
-# BigQuery table for TRANSFORMED data
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # set as a GitHub secret
 
-# Optional Drive target (set as a GitHub secret -> env)
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
-
-# Write GCP credentials file if provided
-if "GCP_CREDENTIALS_JSON" in os.environ:
-    with open("credentials.json", "w") as f:
-        f.write(os.environ["GCP_CREDENTIALS_JSON"])
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials.json"
+# ---- removed the block that wrote credentials.json ----
+# We’ll rely on GOOGLE_APPLICATION_CREDENTIALS env var set by the workflow.
 
 
 def refresh_access_token():
@@ -68,10 +62,8 @@ def _safe_offset(lst, i):
 
 def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df_raw.copy()
-
     df.columns = df.columns.str.replace(".", "_", regex=False)
 
-    # Ensure all expected columns exist
     expected_cols = [
         "id", "name", "type", "sport_type", "moving_time", "elapsed_time", "distance",
         "total_elevation_gain", "start_date_local", "timezone", "start_latlng", "end_latlng",
@@ -84,7 +76,6 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     ts = pd.to_datetime(df["start_date_local"], errors="coerce", utc=True)
 
-    # Build output
     out = pd.DataFrame({
         "id": df["id"],
         "name": df["name"],
@@ -93,7 +84,7 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "moving_time_mins": (df["moving_time"] / 60.0).round(2),
         "elapsed_time_mins": (df["elapsed_time"] / 60.0).round(2),
         "distance_miles": (df["distance"] / 1609.344).round(2),
-        # in meters from Strava
+        # meters from Strava
         "total_elevation_gain": df["total_elevation_gain"],
         "local_start_date": ts.dt.tz_convert(None).dt.date,
         "local_start_time": ts.dt.tz_convert(None).dt.time,
@@ -113,20 +104,18 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "average_cadence": df["average_cadence"],
         "average_watts": df["average_watts"],
         "kilojoules": df["kilojoules"],
-        # Convert meters → feet
+        # meters → feet
         "elevation_high": (df["elev_high"] * 3.280839).round(2) if "elev_high" in df else None,
         "elevation_low": (df["elev_low"] * 3.280839).round(2) if "elev_low" in df else None,
         "elevation_gain": (df["total_elevation_gain"] * 3.280839).round(2),
     })
 
-    # Calculate pace_min_per_mile
     out["pace_min_per_mile"] = out.apply(
         lambda r: round(60 / r["average_speed_mph"],
                         2) if r["average_speed_mph"] and r["average_speed_mph"] > 0 else None,
         axis=1
     )
 
-    # BQ-safe col names
     out.columns = (
         out.columns.str.strip()
         .str.replace(r"[^0-9a-zA-Z_]", "_", regex=True)
@@ -136,7 +125,7 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def upload_to_bigquery(df: pd.DataFrame, table_id: str):
-    client = bigquery.Client()
+    client = bigquery.Client()  # uses GOOGLE_APPLICATION_CREDENTIALS
     job = client.load_table_from_dataframe(
         df, table_id,
         job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE"),
@@ -149,9 +138,13 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
     if not folder_id:
         print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
         return
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not cred_path or not os.path.exists(cred_path):
+        raise RuntimeError(
+            "GOOGLE_APPLICATION_CREDENTIALS not set or file missing.")
+
     creds = service_account.Credentials.from_service_account_file(
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-        scopes=["https://www.googleapis.com/auth/drive.file"],
+        cred_path, scopes=["https://www.googleapis.com/auth/drive.file"]
     )
     service = build("drive", "v3", credentials=creds)
     meta = {"name": os.path.basename(local_csv_path), "parents": [folder_id]}
@@ -175,7 +168,6 @@ if __name__ == "__main__":
     print("Uploading transformed data to BigQuery...")
     upload_to_bigquery(df_clean, BQ_TABLE_ID)
 
-    # Save CSV and push to Drive
     out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
     df_clean.to_csv(out_name, index=False)
     upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)

@@ -14,20 +14,23 @@ from googleapiclient.errors import HttpError
 
 load_dotenv()
 
-# ----- Strava auth (env from GitHub Secrets or .env locally) -----
+# ----- Strava auth -----
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
-# ----- BigQuery target (service account via GOOGLE_APPLICATION_CREDENTIALS) -----
+# ----- BigQuery target -----
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
 
-# ----- Google Drive target (OAuth as your personal account) -----
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+# ----- Google Drive (OAuth as your personal account) -----
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")          # folder ID from URL
 OAUTH_CLIENT_ID = os.getenv("DRIVE_CLIENT_ID")
 OAUTH_CLIENT_SECRET = os.getenv("DRIVE_CLIENT_SECRET")
 OAUTH_REFRESH_TOKEN = os.getenv("DRIVE_REFRESH_TOKEN")
 DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
+
+# Fixed filename to overwrite each run
+DRIVE_FILE_NAME = "strava_transformed.csv"
 
 # ----------------------- Strava helpers -----------------------
 
@@ -150,63 +153,84 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
 
 
 def _build_drive_service_with_oauth():
-    if not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and OAUTH_REFRESH_TOKEN):
+    client_id = os.getenv("DRIVE_CLIENT_ID")
+    client_secret = os.getenv("DRIVE_CLIENT_SECRET")
+    refresh_token = os.getenv("DRIVE_REFRESH_TOKEN")
+    if not (client_id and client_secret and refresh_token):
         raise RuntimeError(
             "Missing DRIVE OAuth secrets (client id/secret/refresh token).")
     creds = UserCredentials(
         token=None,
-        refresh_token=OAUTH_REFRESH_TOKEN,
+        refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=OAUTH_CLIENT_ID,
-        client_secret=OAUTH_CLIENT_SECRET,
+        client_id=client_id,
+        client_secret=client_secret,
         scopes=DRIVE_SCOPE,
     )
     creds.refresh(Request())  # fetch access token
     return build("drive", "v3", credentials=creds)
 
 
-def upload_csv_to_drive(local_csv_path: str, folder_id: str):
+def _resolve_folder(service, fid: str) -> str:
+    """Resolve real folder ID (handles shortcuts)."""
+    meta = service.files().get(
+        fileId=fid,
+        fields="id,name,mimeType,shortcutDetails",
+    ).execute()
+    mt = meta.get("mimeType")
+    if mt == "application/vnd.google-apps.shortcut":
+        target = meta.get("shortcutDetails", {}).get("targetId")
+        if not target:
+            raise RuntimeError(
+                f"Folder ID {fid} is a shortcut without targetId.")
+        return _resolve_folder(service, target)
+    if mt != "application/vnd.google-apps.folder":
+        raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
+    return meta["id"]
+
+
+def upload_csv_to_drive_overwrite(local_csv_path: str, folder_id: str, file_name: str):
     if not folder_id:
         print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
         return
 
     service = _build_drive_service_with_oauth()
+    resolved_folder_id = _resolve_folder(service, folder_id)
 
-    # Resolve folder (handle shortcuts just in case)
-    def resolve_folder(fid: str) -> str:
-        meta = service.files().get(
-            fileId=fid,
-            fields="id,name,mimeType,shortcutDetails",
-        ).execute()
-        mt = meta.get("mimeType")
-        if mt == "application/vnd.google-apps.shortcut":
-            target = meta.get("shortcutDetails", {}).get("targetId")
-            if not target:
-                raise RuntimeError(
-                    f"Folder ID {fid} is a shortcut without targetId.")
-            return resolve_folder(target)
-        if mt != "application/vnd.google-apps.folder":
-            raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
-        return meta["id"]
-
-    try:
-        resolved_folder_id = resolve_folder(folder_id)
-    except HttpError as e:
-        raise RuntimeError(
-            f"Folder ID check failed. Is DRIVE_FOLDER_ID the raw folder ID? Original error: {e}")
+    # Look for an existing file with the same name in the target folder
+    query = (
+        f"'{resolved_folder_id}' in parents and "
+        f"name='{file_name}' and trashed=false"
+    )
+    results = service.files().list(
+        q=query,
+        spaces="drive",
+        fields="files(id,name)",
+    ).execute()
+    files = results.get("files", [])
 
     media = MediaFileUpload(
         local_csv_path, mimetype="text/csv", resumable=True)
-    file_metadata = {"name": os.path.basename(local_csv_path), "parents": [
-        resolved_folder_id]}
 
-    created = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id,name,parents",
-    ).execute()
-    print(
-        f"Uploaded to Drive: {created.get('name')} (id: {created.get('id')})")
+    if files:
+        # Overwrite existing file content
+        file_id = files[0]["id"]
+        updated = service.files().update(
+            fileId=file_id,
+            media_body=media,
+        ).execute()
+        print(
+            f"Overwritten file on Drive: {updated.get('name')} (id: {updated.get('id')})")
+    else:
+        # Create new file
+        file_metadata = {"name": file_name, "parents": [resolved_folder_id]}
+        created = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id,name,parents",
+        ).execute()
+        print(
+            f"Uploaded new file to Drive: {created.get('name')} (id: {created.get('id')})")
 
 
 # ----------------------- Main -----------------------
@@ -224,10 +248,11 @@ if __name__ == "__main__":
     print("Uploading transformed data to BigQuery...")
     upload_to_bigquery(df_clean, BQ_TABLE_ID)
 
-    out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
+    # Save fixed-name CSV (no date suffix)
+    out_name = DRIVE_FILE_NAME
     df_clean.to_csv(out_name, index=False)
 
-    print("Uploading CSV to Google Drive (OAuth)…")
-    upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)
+    print("Uploading CSV to Google Drive (overwrite mode)…")
+    upload_csv_to_drive_overwrite(out_name, DRIVE_FOLDER_ID, DRIVE_FILE_NAME)
 
     print("Done.")

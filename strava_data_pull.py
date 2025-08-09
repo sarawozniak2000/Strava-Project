@@ -5,26 +5,31 @@ import pandas as pd
 from dotenv import load_dotenv
 from google.cloud import bigquery
 
-# Drive API
-from google.oauth2 import service_account
+# Drive API (OAuth as YOU)
+from google.oauth2.credentials import Credentials as UserCredentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
 load_dotenv()
 
+# ----- Strava auth (env from GitHub Secrets or .env locally) -----
 CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
-# BigQuery target (transformed)
+# ----- BigQuery target (service account via GOOGLE_APPLICATION_CREDENTIALS) -----
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
 
-# Drive target
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # set as a GitHub secret
-
-# Full Google Drive scope (not just drive.file)
+# ----- Google Drive target (OAuth as your personal account) -----
+DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
+OAUTH_CLIENT_ID = os.getenv("DRIVE_CLIENT_ID")
+OAUTH_CLIENT_SECRET = os.getenv("DRIVE_CLIENT_SECRET")
+OAUTH_REFRESH_TOKEN = os.getenv("DRIVE_REFRESH_TOKEN")
 DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
+
+# ----------------------- Strava helpers -----------------------
 
 
 def refresh_access_token():
@@ -59,6 +64,8 @@ def get_activities(access_token, per_page=200):
         page += 1
     return activities
 
+# ----------------------- Transform -----------------------
+
 
 def _safe_offset(lst, i):
     return lst[i] if isinstance(lst, (list, tuple)) and len(lst) > i else None
@@ -88,7 +95,7 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "moving_time_mins": (df["moving_time"] / 60.0).round(2),
         "elapsed_time_mins": (df["elapsed_time"] / 60.0).round(2),
         "distance_miles": (df["distance"] / 1609.344).round(2),
-        "total_elevation_gain": df["total_elevation_gain"],
+        "total_elevation_gain": df["total_elevation_gain"],  # meters (raw)
         "local_start_date": ts.dt.tz_convert(None).dt.date,
         "local_start_time": ts.dt.tz_convert(None).dt.time,
         "timezone": df["timezone"],
@@ -107,6 +114,7 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         "average_cadence": df["average_cadence"],
         "average_watts": df["average_watts"],
         "kilojoules": df["kilojoules"],
+        # meters → feet
         "elevation_high": (df["elev_high"] * 3.280839).round(2) if "elev_high" in df else None,
         "elevation_low": (df["elev_low"] * 3.280839).round(2) if "elev_low" in df else None,
         "elevation_gain": (df["total_elevation_gain"] * 3.280839).round(2),
@@ -125,6 +133,8 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
     )
     return out
 
+# ----------------------- BigQuery -----------------------
+
 
 def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     client = bigquery.Client()  # uses GOOGLE_APPLICATION_CREDENTIALS
@@ -136,29 +146,37 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     job.result()
     print(f"Uploaded {len(df)} rows to BigQuery table {table_id}.")
 
+# ----------------------- Drive (OAuth) -----------------------
+
+
+def _build_drive_service_with_oauth():
+    if not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and OAUTH_REFRESH_TOKEN):
+        raise RuntimeError(
+            "Missing DRIVE OAuth secrets (client id/secret/refresh token).")
+    creds = UserCredentials(
+        token=None,
+        refresh_token=OAUTH_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=OAUTH_CLIENT_ID,
+        client_secret=OAUTH_CLIENT_SECRET,
+        scopes=DRIVE_SCOPE,
+    )
+    creds.refresh(Request())  # fetch access token
+    return build("drive", "v3", credentials=creds)
+
 
 def upload_csv_to_drive(local_csv_path: str, folder_id: str):
     if not folder_id:
         print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
         return
 
-    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not cred_path or not os.path.exists(cred_path):
-        raise RuntimeError(
-            "GOOGLE_APPLICATION_CREDENTIALS not set or file missing.")
+    service = _build_drive_service_with_oauth()
 
-    creds = service_account.Credentials.from_service_account_file(
-        cred_path, scopes=DRIVE_SCOPE
-    )
-    print("Uploading to Drive as service account:", creds.service_account_email)
-
-    service = build("drive", "v3", credentials=creds)
-
+    # Resolve folder (handle shortcuts just in case)
     def resolve_folder(fid: str) -> str:
         meta = service.files().get(
             fileId=fid,
-            fields="id,name,mimeType,driveId,shortcutDetails",
-            supportsAllDrives=True
+            fields="id,name,mimeType,shortcutDetails",
         ).execute()
         mt = meta.get("mimeType")
         if mt == "application/vnd.google-apps.shortcut":
@@ -175,9 +193,7 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
         resolved_folder_id = resolve_folder(folder_id)
     except HttpError as e:
         raise RuntimeError(
-            f"Folder ID check failed. Is DRIVE_FOLDER_ID correct and shared with "
-            f"{creds.service_account_email}? Original error: {e}"
-        )
+            f"Folder ID check failed. Is DRIVE_FOLDER_ID the raw folder ID? Original error: {e}")
 
     media = MediaFileUpload(
         local_csv_path, mimetype="text/csv", resumable=True)
@@ -188,12 +204,12 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
         body=file_metadata,
         media_body=media,
         fields="id,name,parents",
-        supportsAllDrives=True
     ).execute()
     print(
         f"Uploaded to Drive: {created.get('name')} (id: {created.get('id')})")
 
 
+# ----------------------- Main -----------------------
 if __name__ == "__main__":
     print("Starting Strava data sync...")
     token = refresh_access_token()
@@ -211,7 +227,7 @@ if __name__ == "__main__":
     out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
     df_clean.to_csv(out_name, index=False)
 
-    print("Uploading CSV to Google Drive...")
+    print("Uploading CSV to Google Drive (OAuth)…")
     upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)
 
     print("Done.")

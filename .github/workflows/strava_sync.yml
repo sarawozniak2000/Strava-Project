@@ -22,17 +22,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
+          # make sure oauth + gbq are available even if not in requirements.txt
+          pip install google-auth-oauthlib pandas-gbq>=0.26.1
 
-      - name: Decode GCP credentials
+      - name: Decode GCP service account (for BigQuery)
         shell: bash
         run: |
           echo "${{ secrets.GCP_CREDENTIALS_B64 }}" | base64 -d > /tmp/credentials.json
 
-      - name: Export env vars
+      - name: Export environment variables
         run: |
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json" >> $GITHUB_ENV
           echo "DRIVE_FOLDER_ID=${{ secrets.DRIVE_FOLDER_ID }}" >> $GITHUB_ENV
+          echo "DRIVE_CLIENT_ID=${{ secrets.DRIVE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "DRIVE_CLIENT_SECRET=${{ secrets.DRIVE_CLIENT_SECRET }}" >> $GITHUB_ENV
+          echo "DRIVE_REFRESH_TOKEN=${{ secrets.DRIVE_REFRESH_TOKEN }}" >> $GITHUB_ENV
 
       - name: Run data pull + transform + uploads
         env:

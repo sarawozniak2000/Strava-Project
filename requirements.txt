@@ -2,6 +2,8 @@ pandas
 requests
 python-dotenv
 google-cloud-bigquery
+google-api-python-client
 google-auth
-pyarrow
+google-auth-httplib2
+google-auth-oauthlib
 pandas-gbq>=0.26.1

@@ -54,7 +54,7 @@ start_d, end_d = st.sidebar.slider(
     min_value=min_d,
     max_value=max_d,
     value=(max(min_d, max_d - timedelta(days=180)), max_d),
-    format="YYYY-MM-DD"
+    format="MM/DD/YYYY"
 )
 
 # ---------- Query data ----------

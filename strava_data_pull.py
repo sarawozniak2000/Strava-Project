@@ -132,6 +132,10 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
         .str.replace(r"[^0-9a-zA-Z_]", "_", regex=True)
         .str.replace(r"_+", "_", regex=True)
     )
+
+    # Drop original lat/lon columns
+    out = out.drop(columns=["start_latlng", "end_latlng"])
+
     return out
 
 # ----------------------- Reverse Geocoding (OSM/Nominatim) -----------------------

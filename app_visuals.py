@@ -47,10 +47,10 @@ def fetch_domains():
 
 sports, cities, min_d, max_d = fetch_domains()
 
-sport = st.sidebar.selectbox("Sport", ["(All)"] + sports)
+sport = st.sidebar.selectbox("Activity Type", ["(All)"] + sports)
 sel_cities = st.sidebar.multiselect("City", cities, default=[])
 start_d, end_d = st.sidebar.date_input(
-    "Date range", (max(min_d, max_d - timedelta(days=180)), max_d), min_value=min_d, max_value=max_d
+    "Date Range", (max(min_d, max_d - timedelta(days=180)), max_d), min_value=min_d, max_value=max_d
 )
 
 # ---------- Query data ----------

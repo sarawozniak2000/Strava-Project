@@ -10,7 +10,7 @@ TABLE = "strava_activity_upload.strava_data_cleaned"
 FULL_TABLE = f"`{PROJECT}.{TABLE}`"
 
 st.set_page_config(page_title="Strava Explorer", layout="wide")
-st.title("🏃 Strava Explorer")
+st.title("Strava Insights")
 
 # ---------- BigQuery client (works locally and on Streamlit Cloud) ----------
 def make_bq_client():

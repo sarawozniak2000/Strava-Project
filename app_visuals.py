@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+
+
 PROJECT = "vast-cogency-464203-t0"
 TABLE = "strava_activity_upload.strava_data_cleaned"
 FULL_TABLE = f"`{PROJECT}.{TABLE}`"

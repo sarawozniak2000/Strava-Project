@@ -79,17 +79,23 @@ if "(All)" in sel_cities:
 
 # ---------- Query data ----------
 @st.cache_data(ttl=600, show_spinner=False)
-def load_data(sport, cities, start_d, end_d):
+def load_data(sel_sports, sel_cities, start_d, end_d):
     params = [
         bigquery.ScalarQueryParameter("start_d", "DATE", start_d),
         bigquery.ScalarQueryParameter("end_d", "DATE", end_d),
-        bigquery.ScalarQueryParameter(
-            "sport", "STRING", "" if sport == "(All)" else sport),
     ]
+
+    # Build filter clauses only if not "(All)" and not empty
+    sports_cond = "TRUE"
+    if sel_sports and "(All)" not in sel_sports:
+        params.append(bigquery.ArrayQueryParameter(
+            "sports", "STRING", sel_sports))
+        sports_cond = "subtype IN UNNEST(@sports)"
+
     cities_cond = "TRUE"
-    if cities:
-        # Use UNNEST for IN-list safely
-        params.append(bigquery.ArrayQueryParameter("cities", "STRING", cities))
+    if sel_cities and "(All)" not in sel_cities:
+        params.append(bigquery.ArrayQueryParameter(
+            "cities", "STRING", sel_cities))
         cities_cond = "city IN UNNEST(@cities)"
 
     sql = f"""
@@ -105,17 +111,20 @@ def load_data(sport, cities, start_d, end_d):
         start_latitude, start_longitude
       FROM {FULL_TABLE}
       WHERE local_start_date BETWEEN @start_d AND @end_d
-        AND (@sport = '' OR subtype = @sport)
+        AND {sports_cond}
         AND {cities_cond}
     )
     SELECT * FROM b ORDER BY d DESC
     """
+
     job = client.query(
         sql, job_config=bigquery.QueryJobConfig(query_parameters=params))
     return job.result().to_dataframe()
 
 
-df = load_data(sport, sel_cities, start_d, end_d)
+# Use the multiselect outputs
+df = load_data(sel_sports, sel_cities, start_d, end_d)
+
 
 # ---------- KPIs ----------
 c1, c2, c3, c4 = st.columns(4)

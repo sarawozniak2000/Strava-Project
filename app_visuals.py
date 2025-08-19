@@ -76,6 +76,18 @@ if "(All)" in sel_sports:
 if "(All)" in sel_cities:
     sel_cities = cities  # use the full cities list
 
+# after sports, cities, min_d, max_d = fetch_domains()
+
+# ---------- Date range slider ----------
+start_d, end_d = st.sidebar.slider(
+    "Date range",
+    min_value=min_d,
+    max_value=max_d,
+    value=(max(min_d, max_d - timedelta(days=180)),
+           max_d),  # default = last 180 days
+    format="MM/DD/YYYY"
+)
+
 
 # ---------- Query data ----------
 @st.cache_data(ttl=600, show_spinner=False)

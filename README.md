@@ -1,6 +1,9 @@
 # Strava Data Analytics Project
 
-This project automates the process of pulling, transforming, and analyzing data from Strava, with results uploaded to Google BigQuery and Google Drive. It is designed to help you familiarize yourself with the end-to-end workflow of a data analytics project.
+This project automates the process of pulling, transforming, and analyzing data from Strava, with results uploaded to Google BigQuery and Google Drive. It was is designed to help me familiarize myself with the end-to-end workflow of a data analytics project.
+
+## App Link
+https://strava-project-uuezk4npqywn2ea62uhxhs.streamlit.app/
 
 ## Features
 

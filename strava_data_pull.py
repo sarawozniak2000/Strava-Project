@@ -1,4 +1,5 @@
 # strava_data_pull.py
+from google.oauth2 import service_account
 import os
 import requests
 import time
@@ -36,6 +37,7 @@ DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
 
 # ----------------------- Strava helpers -----------------------
 
+
 def refresh_access_token():
     r = requests.post(
         "https://www.strava.com/oauth/token",
@@ -49,6 +51,7 @@ def refresh_access_token():
     )
     r.raise_for_status()
     return r.json()["access_token"]
+
 
 def get_activities(access_token, per_page=200):
     activities, page = [], 1
@@ -69,8 +72,10 @@ def get_activities(access_token, per_page=200):
 
 # ----------------------- Transform -----------------------
 
+
 def _safe_offset(lst, i):
     return lst[i] if isinstance(lst, (list, tuple)) and len(lst) > i else None
+
 
 def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df_raw.copy()
@@ -140,8 +145,10 @@ def transform_like_sql(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 # ----------------------- Reverse Geocoding (OSM/Nominatim) -----------------------
 
+
 def _round_key(lat, lon, places=3):
     return f"{round(float(lat), places)}|{round(float(lon), places)}"
+
 
 def add_reverse_geocode_columns(df: pd.DataFrame,
                                 lat_col: str = "start_latitude",
@@ -193,20 +200,23 @@ def add_reverse_geocode_columns(df: pd.DataFrame,
             continue
 
         addr = loc.raw.get("address", {})
-        city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("hamlet")
+        city = addr.get("city") or addr.get(
+            "town") or addr.get("village") or addr.get("hamlet")
         state = addr.get("state")
         country = addr.get("country")
         mapping[k] = (city, state, country)
 
     # Map back to rows
     vals = keys_series.map(lambda k: mapping.get(k, (None, None, None)))
-    city_state_country = pd.DataFrame(vals.tolist(), columns=["city", "state", "country"])
+    city_state_country = pd.DataFrame(
+        vals.tolist(), columns=["city", "state", "country"])
     for col in ["city", "state", "country"]:
         df[col] = city_state_country[col]
 
     return df
 
 # ----------------------- BigQuery -----------------------
+
 
 def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     client = bigquery.Client()  # uses GOOGLE_APPLICATION_CREDENTIALS
@@ -218,28 +228,27 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     job.result()
     print(f"Uploaded {len(df)} rows to BigQuery table {table_id}.")
 
-# ----------------------- Drive (OAuth) -----------------------
 
-def _build_drive_service_with_oauth():
-    if not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and OAUTH_REFRESH_TOKEN):
-        raise RuntimeError("Missing DRIVE OAuth secrets (client id/secret/refresh token).")
-    creds = UserCredentials(
-        token=None,
-        refresh_token=OAUTH_REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=OAUTH_CLIENT_ID,
-        client_secret=OAUTH_CLIENT_SECRET,
-        scopes=DRIVE_SCOPE,
+# ----------------------- Drive (Service Account) -----------------------
+
+
+def _build_drive_service_with_service_account():
+    # Load credentials from GOOGLE_APPLICATION_CREDENTIALS (set in GitHub Actions)
+    sa_path = os.environ.get(
+        "GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
+    creds = service_account.Credentials.from_service_account_file(
+        sa_path,
+        scopes=["https://www.googleapis.com/auth/drive"]
     )
-    creds.refresh(Request())  # fetch access token
     return build("drive", "v3", credentials=creds)
+
 
 def upload_csv_to_drive(local_csv_path: str, folder_id: str):
     if not folder_id:
         print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
         return
 
-    service = _build_drive_service_with_oauth()
+    service = _build_drive_service_with_service_account()
 
     # Resolve folder (handle shortcuts)
     def resolve_folder(fid: str) -> str:
@@ -251,7 +260,8 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
         if mt == "application/vnd.google-apps.shortcut":
             target = meta.get("shortcutDetails", {}).get("targetId")
             if not target:
-                raise RuntimeError(f"Folder ID {fid} is a shortcut without targetId.")
+                raise RuntimeError(
+                    f"Folder ID {fid} is a shortcut without targetId.")
             return resolve_folder(target)
         if mt != "application/vnd.google-apps.folder":
             raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
@@ -264,15 +274,19 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
             f"Folder ID check failed. Is DRIVE_FOLDER_ID the raw folder ID? Original error: {e}"
         )
 
-    media = MediaFileUpload(local_csv_path, mimetype="text/csv", resumable=True)
-    file_metadata = {"name": os.path.basename(local_csv_path), "parents": [resolved_folder_id]}
+    media = MediaFileUpload(
+        local_csv_path, mimetype="text/csv", resumable=True)
+    file_metadata = {"name": os.path.basename(local_csv_path), "parents": [
+        resolved_folder_id]}
 
     created = service.files().create(
         body=file_metadata,
         media_body=media,
         fields="id,name,parents",
     ).execute()
-    print(f"Uploaded to Drive: {created.get('name')} (id: {created.get('id')})")
+    print(
+        f"Uploaded to Drive: {created.get('name')} (id: {created.get('id')})")
+
 
 # ----------------------- Main -----------------------
 if __name__ == "__main__":
@@ -287,7 +301,8 @@ if __name__ == "__main__":
     df_clean = transform_like_sql(raw)
 
     print("Reverse geocoding start coordinates with OSM/Nominatim…")
-    df_clean = add_reverse_geocode_columns(df_clean, "start_latitude", "start_longitude", places=3)
+    df_clean = add_reverse_geocode_columns(
+        df_clean, "start_latitude", "start_longitude", places=3)
 
     print("Uploading transformed data to BigQuery...")
     upload_to_bigquery(df_clean, BQ_TABLE_ID)

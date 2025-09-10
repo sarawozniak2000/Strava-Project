@@ -229,7 +229,7 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     print(f"Uploaded {len(df)} rows to BigQuery table {table_id}.")
 
 
-# ----------------------- Drive (Service Account) -----------------------
+# ----------------------- Drive (Service Account + Overwrite) -----------------------
 
 
 def _build_drive_service_with_service_account():
@@ -243,7 +243,11 @@ def _build_drive_service_with_service_account():
     return build("drive", "v3", credentials=creds)
 
 
-def upload_csv_to_drive(local_csv_path: str, folder_id: str):
+def upload_csv_to_drive_overwrite(local_csv_path: str, folder_id: str, target_file_name: str):
+    """
+    Uploads a CSV to Google Drive. If a file with the same name exists in the folder,
+    it will be overwritten. Otherwise, a new file is created.
+    """
     if not folder_id:
         print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
         return
@@ -267,25 +271,36 @@ def upload_csv_to_drive(local_csv_path: str, folder_id: str):
             raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
         return meta["id"]
 
-    try:
-        resolved_folder_id = resolve_folder(folder_id)
-    except HttpError as e:
-        raise RuntimeError(
-            f"Folder ID check failed. Is DRIVE_FOLDER_ID the raw folder ID? Original error: {e}"
-        )
+    resolved_folder_id = resolve_folder(folder_id)
+
+    # Search for existing file with the same name in the folder
+    query = f"'{resolved_folder_id}' in parents and name = '{target_file_name}' and trashed = false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    files = results.get("files", [])
 
     media = MediaFileUpload(
         local_csv_path, mimetype="text/csv", resumable=True)
-    file_metadata = {"name": os.path.basename(local_csv_path), "parents": [
-        resolved_folder_id]}
 
-    created = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id,name,parents",
-    ).execute()
-    print(
-        f"Uploaded to Drive: {created.get('name')} (id: {created.get('id')})")
+    if files:
+        # Overwrite existing file
+        file_id = files[0]["id"]
+        updated = service.files().update(
+            fileId=file_id,
+            media_body=media,
+        ).execute()
+        print(
+            f"Overwritten Drive file: {updated.get('name')} (id: {updated.get('id')})")
+    else:
+        # Create new file
+        file_metadata = {"name": target_file_name,
+                         "parents": [resolved_folder_id]}
+        created = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id,name,parents",
+        ).execute()
+        print(
+            f"Created new Drive file: {created.get('name')} (id: {created.get('id')})")
 
 
 # ----------------------- Main -----------------------
@@ -310,7 +325,9 @@ if __name__ == "__main__":
     out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
     df_clean.to_csv(out_name, index=False)
 
-    print("Uploading CSV to Google Drive (OAuth)…")
-    upload_csv_to_drive(out_name, DRIVE_FOLDER_ID)
+    print("Uploading CSV to Google Drive (overwrite mode)…")
+    # Always overwrite with the same name in Drive
+    DRIVE_FILE_NAME = "strava_transformed.csv"
+    upload_csv_to_drive_overwrite(out_name, DRIVE_FOLDER_ID, DRIVE_FILE_NAME)
 
     print("Done.")

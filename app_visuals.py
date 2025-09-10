@@ -191,11 +191,20 @@ else:
     else:
         st.caption("No coordinates to map for the selected filters.")
 
-    # Table
+    # Activites table
     st.subheader("Activities")
+    display_df = df[["d", "subtype", "city", "name", "distance_miles",
+                     "pace_min_per_mile", "elevation_gain"]].rename(columns={
+                         "d": "Date",
+                         "subtype": "Activity Type",
+                         "city": "City",
+                         "name": "Activity Name",
+                         "distance_miles": "Miles",
+                         "pace_min_per_mile": "Pace (min/mi)",
+                         "elevation_gain": "Elevation Gain (ft)"
+                     })
     st.dataframe(
-        df[["d", "subtype", "city", "name", "distance_miles",
-            "pace_min_per_mile", "elevation_gain"]],
+        display_df,
         use_container_width=True,
         hide_index=True,
     )

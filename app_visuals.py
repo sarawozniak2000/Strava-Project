@@ -51,8 +51,7 @@ def fetch_domains():
 
 
 sports, cities, min_d, max_d = fetch_domains()
-
-# Add "(All)" option to both lists
+ # Add "(All)" option to both lists
 sports_options = ["(All)"] + sports
 cities_options = ["(All)"] + cities
 
@@ -75,10 +74,6 @@ if "(All)" in sel_sports:
 
 if "(All)" in sel_cities:
     sel_cities = cities  # use the full cities list
-
-# after sports, cities, min_d, max_d = fetch_domains()
-
-# ---------- Date range slider ----------
 start_d, end_d = st.sidebar.slider(
     "Date range",
     min_value=min_d,

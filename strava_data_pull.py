@@ -7,6 +7,9 @@ import pandas as pd
 from dotenv import load_dotenv
 from google.cloud import bigquery
 from datetime import datetime
+from google.cloud.bigquery import Client
+from google.cloud.bigquery import QueryJobConfig
+
 
 # Reverse geocoding (OpenStreetMap / Nominatim)
 from geopy.geocoders import Nominatim

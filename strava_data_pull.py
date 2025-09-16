@@ -8,13 +8,6 @@ from dotenv import load_dotenv
 from google.cloud import bigquery
 from datetime import datetime
 
-# Drive API (OAuth as YOU)
-from google.oauth2.credentials import Credentials as UserCredentials
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from googleapiclient.errors import HttpError
-
 # Reverse geocoding (OpenStreetMap / Nominatim)
 from geopy.geocoders import Nominatim
 
@@ -27,13 +20,6 @@ REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
 # ----- BigQuery target (service account via GOOGLE_APPLICATION_CREDENTIALS) -----
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
-
-# ----- Google Drive target (OAuth as your personal account) -----
-DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")
-OAUTH_CLIENT_ID = os.getenv("DRIVE_CLIENT_ID")
-OAUTH_CLIENT_SECRET = os.getenv("DRIVE_CLIENT_SECRET")
-OAUTH_REFRESH_TOKEN = os.getenv("DRIVE_REFRESH_TOKEN")
-DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
 
 # ----------------------- Strava helpers -----------------------
 
@@ -229,80 +215,6 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     print(f"Uploaded {len(df)} rows to BigQuery table {table_id}.")
 
 
-# ----------------------- Drive (Service Account + Overwrite) -----------------------
-
-
-def _build_drive_service_with_service_account():
-    # Load credentials from GOOGLE_APPLICATION_CREDENTIALS (set in GitHub Actions)
-    sa_path = os.environ.get(
-        "GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
-    creds = service_account.Credentials.from_service_account_file(
-        sa_path,
-        scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    return build("drive", "v3", credentials=creds)
-
-
-def upload_csv_to_drive_overwrite(local_csv_path: str, folder_id: str, target_file_name: str):
-    """
-    Uploads a CSV to Google Drive. If a file with the same name exists in the folder,
-    it will be overwritten. Otherwise, a new file is created.
-    """
-    if not folder_id:
-        print("DRIVE_FOLDER_ID not set; skipping Drive upload.")
-        return
-
-    service = _build_drive_service_with_service_account()
-
-    # Resolve folder (handle shortcuts)
-    def resolve_folder(fid: str) -> str:
-        meta = service.files().get(
-            fileId=fid,
-            fields="id,name,mimeType,shortcutDetails",
-        ).execute()
-        mt = meta.get("mimeType")
-        if mt == "application/vnd.google-apps.shortcut":
-            target = meta.get("shortcutDetails", {}).get("targetId")
-            if not target:
-                raise RuntimeError(
-                    f"Folder ID {fid} is a shortcut without targetId.")
-            return resolve_folder(target)
-        if mt != "application/vnd.google-apps.folder":
-            raise RuntimeError(f"ID {fid} is not a folder (mimeType={mt}).")
-        return meta["id"]
-
-    resolved_folder_id = resolve_folder(folder_id)
-
-    # Search for existing file with the same name in the folder
-    query = f"'{resolved_folder_id}' in parents and name = '{target_file_name}' and trashed = false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get("files", [])
-
-    media = MediaFileUpload(
-        local_csv_path, mimetype="text/csv", resumable=True)
-
-    if files:
-        # Overwrite existing file
-        file_id = files[0]["id"]
-        updated = service.files().update(
-            fileId=file_id,
-            media_body=media,
-        ).execute()
-        print(
-            f"Overwritten Drive file: {updated.get('name')} (id: {updated.get('id')})")
-    else:
-        # Create new file
-        file_metadata = {"name": target_file_name,
-                         "parents": [resolved_folder_id]}
-        created = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id,name,parents",
-        ).execute()
-        print(
-            f"Created new Drive file: {created.get('name')} (id: {created.get('id')})")
-
-
 # ----------------------- Main -----------------------
 if __name__ == "__main__":
     print("Starting Strava data sync...")
@@ -324,10 +236,5 @@ if __name__ == "__main__":
 
     out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
     df_clean.to_csv(out_name, index=False)
-
-    print("Uploading CSV to Google Drive (overwrite mode)…")
-    # Always overwrite with the same name in Drive
-    DRIVE_FILE_NAME = "strava_transformed.csv"
-    upload_csv_to_drive_overwrite(out_name, DRIVE_FOLDER_ID, DRIVE_FILE_NAME)
 
     print("Done.")

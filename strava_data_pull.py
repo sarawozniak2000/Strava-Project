@@ -24,7 +24,20 @@ REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 # ----- BigQuery target (service account via GOOGLE_APPLICATION_CREDENTIALS) -----
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
 
-# ----------------------- Strava helpers -----------------------
+
+# -------- Get most recent activity from upload history table --------------
+def get_last_pull_time(client, history_table):
+    query = f"""
+        SELECT MAX(strava_mostrecentdata) AS last_pull
+        FROM `{history_table}`
+        WHERE status = 'success'
+    """
+    result = client.query(query).result()
+    for row in result:
+        return row.last_pull
+    return None
+
+# ----------------------- Strava API call -----------------------
 
 
 def refresh_access_token():
@@ -44,13 +57,17 @@ def refresh_access_token():
 # Get all activities (paginated)
 
 
-def get_activities(access_token, per_page=200):
+def get_activities(access_token, per_page=200, after_timestamp=None):
     activities, page = [], 1
     while True:
+        params = {"per_page": per_page, "page": page}
+        if after_timestamp:
+            params["after"] = int(after_timestamp.timestamp())
+
         resp = requests.get(
             "https://www.strava.com/api/v3/athlete/activities",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={"per_page": per_page, "page": page},
+            params=params,
             timeout=60,
         )
         resp.raise_for_status()
@@ -214,10 +231,12 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
     job = client.load_table_from_dataframe(
         df,
         table_id,
-        job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE"),
+        job_config=bigquery.LoadJobConfig(
+            write_disposition="WRITE_APPEND"   # ✅ append new rows only
+        ),
     )
     job.result()
-    print(f"Uploaded {len(df)} rows to BigQuery table {table_id}.")
+    print(f"Appended {len(df)} new rows to BigQuery table {table_id}.")
 
 
 # ----------------------- Main -----------------------

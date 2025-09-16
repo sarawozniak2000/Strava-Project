@@ -26,7 +26,9 @@ jobs:
           pip install google-cloud-bigquery google-api-python-client google-auth google-auth-oauthlib pandas-gbq>=0.26.1 geopy
 
       - name: Write service account key
-        run: echo "${{ secrets.GCP_CREDENTIALS_JSON }}"" > $HOME/service_account.json
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS_JSON }}" | tee $HOME/service_account.json > /dev/null
+
 
       - name: Export environment variables
         run: |

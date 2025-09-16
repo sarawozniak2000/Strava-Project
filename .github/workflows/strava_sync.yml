@@ -31,7 +31,11 @@ jobs:
       - name: Export environment variables
         run: |
           echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/service_account.json" >> $GITHUB_ENV
-          echo "DRIVE_FOLDER_ID=${{ secrets.DRIVE_FOLDER_ID }}" >> $GITHUB_ENV
+      
+      - name: Check credentials file
+        run: |
+          ls -l $HOME/service_account.json
+          head -n 5 $HOME/service_account.json
 
       - name: Run data pull + transform + uploads
         env:

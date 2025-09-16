@@ -38,6 +38,8 @@ def refresh_access_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
+# Get all activities (paginated)
+
 
 def get_activities(access_token, per_page=200):
     activities, page = [], 1

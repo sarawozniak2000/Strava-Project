@@ -232,7 +232,7 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
         df,
         table_id,
         job_config=bigquery.LoadJobConfig(
-            write_disposition="WRITE_APPEND"   # ✅ append new rows only
+            write_disposition="WRITE_APPEND"   # append new rows only
         ),
     )
     job.result()

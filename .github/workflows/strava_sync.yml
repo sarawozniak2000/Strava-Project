@@ -33,9 +33,9 @@ jobs:
           # ensure GCP + Drive libraries are present
           pip install google-cloud-bigquery google-api-python-client google-auth google-auth-oauthlib pandas-gbq>=0.26.1 geopy
 
-      - name: Write service account key
+      - name: Decode service account key
         run: |
-          echo "${{ secrets.GCP_CREDENTIALS_JSON }}" | tee $HOME/service_account.json > /dev/null
+          echo "${{ secrets.GCP_CREDENTIALS_B64 }}" | base64 -d > $HOME/service_account.json
 
       - name: Export environment variables
         run: |
@@ -44,7 +44,6 @@ jobs:
       - name: Verify GCP credentials
         run: |
           python - <<'EOF'
-          from google.oauth2 import service_account
           import json, os
 
           creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -53,6 +52,7 @@ jobs:
           with open(creds_path, "r") as f:
               data = json.load(f)
               print("Loaded service account for:", data.get("client_email"))
+              print("Project ID:", data.get("project_id"))
           EOF
 
       - name: Run data pull + transform + uploads

@@ -18,6 +18,14 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -29,15 +37,23 @@ jobs:
         run: |
           echo "${{ secrets.GCP_CREDENTIALS_JSON }}" | tee $HOME/service_account.json > /dev/null
 
-
       - name: Export environment variables
         run: |
           echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/service_account.json" >> $GITHUB_ENV
-      
-      - name: Check credentials file
+
+      - name: Verify GCP credentials
         run: |
-          ls -l $HOME/service_account.json
-          head -n 5 $HOME/service_account.json
+          python - <<'EOF'
+          from google.oauth2 import service_account
+          import json, os
+
+          creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+          print("Using creds file:", creds_path)
+
+          with open(creds_path, "r") as f:
+              data = json.load(f)
+              print("Loaded service account for:", data.get("client_email"))
+          EOF
 
       - name: Run data pull + transform + uploads
         env:

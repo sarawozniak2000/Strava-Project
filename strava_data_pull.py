@@ -23,6 +23,7 @@ REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
 # ----- BigQuery target (service account via GOOGLE_APPLICATION_CREDENTIALS) -----
 BQ_TABLE_ID = "vast-cogency-464203-t0.strava_activity_upload.strava_data_cleaned"
+histrory_table = "vast-cogency-464203-t0.strava_activity_upload.upload_history"
 
 
 # -------- Get most recent activity from upload history table --------------
@@ -54,8 +55,8 @@ def refresh_access_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
-# Get all activities (paginated)
 
+# Get all activities (paginated)
 
 def get_activities(access_token, per_page=200, after_timestamp=None):
     activities, page = [], 1
@@ -240,25 +241,68 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
 
 
 # ----------------------- Main -----------------------
+# ----------------------- Main -----------------------
 if __name__ == "__main__":
     print("Starting Strava data sync...")
-    token = refresh_access_token()
-    data = get_activities(token)
+    client = bigquery.Client()
+    HISTORY_TABLE = "vast-cogency-464203-t0.strava_activity_upload.upload_history"
 
-    raw = pd.json_normalize(data)
-    raw.columns = raw.columns.str.replace(".", "_", regex=False)
+    try:
+        #  Refresh Strava token
+        token = refresh_access_token()
 
-    print("Transforming in Python...")
-    df_clean = transform_like_sql(raw)
+        # Look up last successful pull
+        last_pull = get_last_pull_time(client, HISTORY_TABLE)
+        print("Last successful pull:", last_pull)
 
-    print("Reverse geocoding start coordinates with OSM/Nominatim…")
-    df_clean = add_reverse_geocode_columns(
-        df_clean, "start_latitude", "start_longitude", places=3)
+        # Get only new activities since last_pull
+        data = get_activities(token, after_timestamp=last_pull)
+        if not data:
+            print("No new activities found.")
+            exit(0)
 
-    print("Uploading transformed data to BigQuery...")
-    upload_to_bigquery(df_clean, BQ_TABLE_ID)
+        # Transform
+        raw = pd.json_normalize(data)
+        raw.columns = raw.columns.str.replace(".", "_", regex=False)
 
-    out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
-    df_clean.to_csv(out_name, index=False)
+        print("Transforming in Python...")
+        df_clean = transform_like_sql(raw)
 
-    print("Done.")
+        print("Reverse geocoding start coordinates with OSM/Nominatim…")
+        df_clean = add_reverse_geocode_columns(
+            df_clean, "start_latitude", "start_longitude", places=3
+        )
+
+        # Upload to BigQuery (append)
+        print("Uploading transformed data to BigQuery...")
+        upload_to_bigquery(df_clean, BQ_TABLE_ID)
+
+        # Log into upload_history
+        most_recent_date = pd.to_datetime(df_clean["local_start_date"]).max()
+        rows_to_insert = [{
+            "datapull_time": datetime.utcnow().isoformat(),
+            "strava_mostrecentdata": most_recent_date.isoformat(),
+            "status": "success"
+        }]
+        errors = client.insert_rows_json(HISTORY_TABLE, rows_to_insert)
+        if errors:
+            print("⚠️ Failed to log upload:", errors)
+        else:
+            print(
+                f"Logged upload: success, last activity = {most_recent_date}")
+
+        # Save CSV snapshot
+        out_name = f"strava_transformed_{pd.Timestamp.utcnow():%Y%m%d}.csv"
+        df_clean.to_csv(out_name, index=False)
+
+        print("Done.")
+
+    except Exception as e:
+        # Log failure to history table
+        rows_to_insert = [{
+            "datapull_time": datetime.utcnow().isoformat(),
+            "strava_mostrecentdata": None,
+            "status": f"failed: {e}"
+        }]
+        client.insert_rows_json(HISTORY_TABLE, rows_to_insert)
+        raise

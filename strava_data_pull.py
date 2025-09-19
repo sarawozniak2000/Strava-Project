@@ -241,7 +241,6 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
 
 
 # ----------------------- Main -----------------------
-# ----------------------- Main -----------------------
 if __name__ == "__main__":
     print("Starting Strava data sync...")
     client = bigquery.Client()
@@ -282,7 +281,8 @@ if __name__ == "__main__":
         rows_to_insert = [{
             "datapull_time": datetime.utcnow().isoformat(),
             "strava_mostrecentdata": most_recent_date.isoformat(),
-            "status": "success"
+            "status": "success",
+            "lastactivityid": int(df_clean["id"].max())
         }]
         errors = client.insert_rows_json(HISTORY_TABLE, rows_to_insert)
         if errors:

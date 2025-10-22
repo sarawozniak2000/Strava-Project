@@ -27,16 +27,17 @@ histrory_table = "vast-cogency-464203-t0.strava_activity_upload.upload_history"
 
 
 # -------- Get most recent activity from upload history table --------------
-def get_last_pull_time(client, history_table):
+def get_last_activity_id(client, history_table):
+    """Get the highest activity ID from the history table."""
     query = f"""
-        SELECT MAX(strava_mostrecentdata) AS last_pull
+        SELECT MAX(lastactivityid) AS last_id
         FROM `{history_table}`
         WHERE status = 'success'
     """
     result = client.query(query).result()
     for row in result:
-        return row.last_pull
-    return None
+        return row.last_id if row.last_id else 0
+    return 0
 
 # ----------------------- Strava API call -----------------------
 
@@ -58,25 +59,39 @@ def refresh_access_token():
 
 # Get all activities (paginated)
 
-def get_activities(access_token, per_page=200, after_timestamp=None):
-    activities, page = [], 1
+def get_activities(access_token, per_page=200, after_id=0):
+    """Get all activities after specified ID."""
+    activities = []
+    page = 1
+    
     while True:
-        params = {"per_page": per_page, "page": page}
-        if after_timestamp:
-            params["after"] = int(after_timestamp.timestamp())
-
-        resp = requests.get(
+        params = {
+            "per_page": per_page,
+            "page": page
+        }
+        headers = {"Authorization": f"Bearer {access_token}"}
+        
+        r = requests.get(
             "https://www.strava.com/api/v3/athlete/activities",
-            headers={"Authorization": f"Bearer {access_token}"},
             params=params,
-            timeout=60,
+            headers=headers,
+            timeout=60
         )
-        resp.raise_for_status()
-        data = resp.json()
-        if not data:
+        r.raise_for_status()
+        
+        new_activities = r.json()
+        if not new_activities:
             break
-        activities.extend(data)
+            
+        # Filter activities with ID > after_id
+        filtered_activities = [a for a in new_activities if a['id'] > after_id]
+        activities.extend(filtered_activities)
+        
+        if len(new_activities) < per_page:
+            break
+            
         page += 1
+        
     return activities
 
 # ----------------------- Transform -----------------------
@@ -250,12 +265,12 @@ if __name__ == "__main__":
         #  Refresh Strava token
         token = refresh_access_token()
 
-        # Look up last successful pull
-        last_pull = get_last_pull_time(client, HISTORY_TABLE)
-        print("Last successful pull:", last_pull)
+        # Look up last activity ID
+        last_id = get_last_activity_id(client, HISTORY_TABLE)
+        print("Last activity ID:", last_id)
 
-        # Get only new activities since last_pull
-        data = get_activities(token, after_timestamp=last_pull)
+        # Get only new activities since last_id
+        data = get_activities(token, after_id=last_id)
         if not data:
             print("No new activities found.")
             exit(0)

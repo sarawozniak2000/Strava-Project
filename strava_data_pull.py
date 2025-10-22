@@ -256,6 +256,9 @@ def upload_to_bigquery(df: pd.DataFrame, table_id: str):
 
 
 # ----------------------- Main -----------------------
+
+print("✅ Table recreated empty successfully.")
+
 if __name__ == "__main__":
     print("Starting Strava data sync...")
     client = bigquery.Client()

@@ -269,7 +269,7 @@ if __name__ == "__main__":
         token = refresh_access_token()
 
         # Look up last activity ID
-        last_id = 0
+        last_id = get_last_activity_id(client, HISTORY_TABLE)
         print("Last activity ID:", last_id)
 
         # Get only new activities since last_id
